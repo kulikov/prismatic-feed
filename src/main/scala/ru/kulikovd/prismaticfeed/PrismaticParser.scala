@@ -1,32 +1,159 @@
 package ru.kulikovd.prismaticfeed
 
 import scala.concurrent.duration._
-import akka.util.Timeout
+import scala.util.{Failure, Success}
+
 import akka.actor._
+import akka.pattern.ask
+import akka.util.Timeout
 import spray.client.pipelining._
-import spray.http.{HttpMethods, HttpHeader, HttpCookie, HttpRequest}
-import spray.http.HttpHeaders.{RawHeader, Cookie}
+import spray.http._
+import spray.http.HttpHeaders.`Set-Cookie`
+import spray.http.HttpHeaders.RawHeader
+import spray.json._
 
 
-case object ParseFeed
+case object GetAuthToken
+case object LoadFeed
+case object AuthExpired
+case class UpdateAuthCookies(value: String)
+case class FeedResult(value: String)
+case class AuthError(reason: String)
 
 
-class PrismaticParser extends Actor with ActorLogging {
+class PrismaticParser(username: String, password: String) extends Actor with ActorLogging {
   import context.dispatcher
 
-  implicit val timeout = Timeout(5 second)
+  implicit val timeout = Timeout(10 seconds)
 
-  context.system.scheduler.schedule(3 seconds, 30 seconds, self, ParseFeed)
+  var authCookies: Option[String] = None
 
   def receive = {
-    case ParseFeed =>
-      log.info("Parsing feed")
+    case LoadFeed ⇒ authCookies match {
+      case Some(auth) ⇒ returnFeed(sender, auth)
+      case None ⇒ updateAuthToken(sender)
+    }
 
-      sendReceive.apply(HttpRequest(
-        uri = "http://api.getprismatic.com/news/home",
-        headers = List(RawHeader("Cookie", "_ps_api=23157__ioftlm0egsdfg75b2fosdfju76qrsdf6tka1h776v; AWSELB=1509F1AD0A09EB6sdf234CsgFi87601234ACC3B93041502497BC0E39494F3506234AA5503F5761CEDD243118BFF1D313B78B29E8AE943E7E24DCF3CA837E46AE60AED06EC9F553A166CA4CEC0D302C406E132sdFADB61F9AB8715FADC1ECB885F43BE3D"))
-      )) onSuccess {
-        case response ⇒ println("\n | " + response.entity.asString + "\n |\n")
+    case UpdateAuthCookies ⇒ authinticate()
+  }
+
+  def returnFeed(client: ActorRef, auth: String) {
+    sendReceive.apply(HttpRequest(
+      uri = "http://api.getprismatic.com/news/home",
+      headers = List(RawHeader("Cookie", auth))
+    )) onComplete {
+      case Success(res) ⇒
+        log.info("Feed successfully loaded!")
+        client ! FeedResult(generateRssFeed(res.entity.asString))
+
+      case Failure(e) ⇒
+        log.info("Auth expired {}", e)
+        updateAuthToken(client)
+    }
+  }
+
+  def generateRssFeed(json: String) = {
+    JsonParser(json).asJsObject.fields.get("docs") collect {
+      case JsArray(docs) ⇒ docs map {
+        case JsObject(doc) ⇒ doc("id") + " / " + doc("title") + "\n" + doc("url") + "\n" + doc("text")
       }
+    } map {
+      res ⇒ res.mkString("\n\n\n")
+    } getOrElse("<empty>")
+  }
+
+  def updateAuthToken(client: ActorRef) {
+    self ? UpdateAuthCookies onComplete {
+      case Success(auth: String) ⇒
+        authCookies = Some(auth)
+        returnFeed(client, auth)
+
+      case other ⇒
+        log.error("Auth error {}", other)
+        client ! AuthError(other.toString)
+    }
+  }
+
+  def authinticate() {
+    val originalSender = sender
+
+    /**
+     * 1
+     */
+    sendReceive.apply(Get("http://auth.getprismatic.com/receiver.html")) onComplete {
+      case Success(res) ⇒
+
+        res.header[`Set-Cookie`] foreach { h ⇒
+          val AWSELB = h.cookie.name +"="+ h.cookie.content
+
+          /**
+           * 2
+           */
+          sendReceive.apply(HttpRequest(
+            method = HttpMethods.POST,
+            uri = "http://auth.getprismatic.com/auth/event_public_dispatch?api-version=1.0&ignore=true&whitelist_url=http%3A%2F%2Fgetprismatic.com%2Fnews%2Fhome&soon_url=http%3A%2F%2Fgetprismatic.com%2Fwelcome&create_url=http%3A%2F%2Fgetprismatic.com%2Fcreateaccount&resetpassword_url=http%3A%2F%2Fgetprismatic.com%2Fresetpassword",
+            headers = List(
+              RawHeader("Cookie", AWSELB),
+              RawHeader("Content-Type", "application/json"),
+              RawHeader("Referer", "http://auth.getprismatic.com/receiver.html"),
+              RawHeader("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_7_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/27.0.1453.56 Safari/537.36")
+            ),
+            entity = HttpBody(ContentType.`application/json`, """{"category":"load","page":{"uri":"/","search":"","referer":"http://getprismatic.com/news/home"},"browser":"Chrome 27 (Mac)","type":"landing"}""")
+          )) onComplete {
+            case Success(res2) ⇒
+
+              val pPublic = res2.headers.collect({
+                case `Set-Cookie`(c) if (c.name == "p_public") ⇒ "p_public=" + c.content
+              }).head
+
+              val psWww = res2.headers.collect({
+                case `Set-Cookie`(c) if (c.name == "_ps_www") ⇒ "_ps_www=" + c.content
+              }).head
+
+
+              /**
+               * 3
+               */
+              sendReceive.apply(HttpRequest(
+                method = HttpMethods.POST,
+                uri = "http://auth.getprismatic.com/auth/login?api-version=1.0&ignore=true&whitelist_url=http%3A%2F%2Fgetprismatic.com%2Fnews%2Fhome&soon_url=http%3A%2F%2Fgetprismatic.com%2Fwelcome&create_url=http%3A%2F%2Fgetprismatic.com%2Fcreateaccount&resetpassword_url=http%3A%2F%2Fgetprismatic.com%2Fresetpassword",
+                headers = List(
+                  RawHeader("Cookie", List(AWSELB, pPublic, psWww) mkString "; "),
+                  RawHeader("Content-Type", "application/json"),
+                  RawHeader("Referer", "http://auth.getprismatic.com/receiver.html"),
+                  RawHeader("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_7_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/27.0.1453.56 Safari/537.36")
+                ),
+                entity = HttpBody(ContentType.`application/json`, """{"handle":"%s","password":"%s"}""".format(username, password))
+              )) onComplete {
+                case Success(res3) ⇒
+
+                  val prismatic = res3.headers.collect({
+                    case `Set-Cookie`(c) if (c.name == "prismatic") ⇒ "prismatic=" + c.content
+                  }).head
+
+                  /**
+                   * 4
+                   */
+                  sendReceive.apply(HttpRequest(
+                    method = HttpMethods.GET,
+                    uri = "http://api.getprismatic.com/user/info?rand=21701246&callback=prismatic.userPromise.fulfill&api-version=1.0",
+                    headers = List(
+                      RawHeader("Cookie", List(pPublic, prismatic) mkString "; "),
+                      RawHeader("Referer", "http://getprismatic.com/news/home"),
+                      RawHeader("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_7_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/27.0.1453.56 Safari/537.36")
+                    )
+                  )) onComplete {
+                    case Success(res4) ⇒
+
+                      val psApiAndAWSELB = res4.headers.collect({
+                        case `Set-Cookie`(c) ⇒ c.name + "=" + c.content
+                      }).mkString("; ")
+
+                      originalSender ! psApiAndAWSELB
+                  }
+              }
+          }
+        }
+    }
   }
 }

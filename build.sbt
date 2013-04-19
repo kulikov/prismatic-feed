@@ -17,5 +17,6 @@ libraryDependencies ++= Seq(
   "ch.qos.logback" % "logback-classic" % "1.0.10" % "runtime",
   "io.spray" % "spray-can" % "1.1-M8-SNAPSHOT",
   "io.spray" % "spray-client" % "1.1-M8-SNAPSHOT",
-  "io.spray" % "spray-http" % "1.1-M8-SNAPSHOT"
+  "io.spray" % "spray-http" % "1.1-M8-SNAPSHOT",
+  "io.spray" %% "spray-json" % "1.2.3"
 )

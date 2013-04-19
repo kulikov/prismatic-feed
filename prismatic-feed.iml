@@ -10,11 +10,11 @@
     </content>
     <orderEntry type="inheritedJdk" />
     <orderEntry type="sourceFolder" forTests="false" />
-    <orderEntry type="library" name="spray-can" level="project" />
-    <orderEntry type="library" name="spray-http" level="project" />
-    <orderEntry type="library" name="akka-actor_2.10-2.1.2" level="project" />
-    <orderEntry type="library" name="spray-util" level="project" />
     <orderEntry type="library" name="scala-compiler-2.10.1" level="application" />
+    <orderEntry type="library" name="spray" level="project" />
+    <orderEntry type="library" name="akka-actor" level="project" />
+    <orderEntry type="library" name="spray-json_2.10-1.2.3" level="project" />
+    <orderEntry type="library" name="config-1.0.0" level="project" />
   </component>
 </module>
 

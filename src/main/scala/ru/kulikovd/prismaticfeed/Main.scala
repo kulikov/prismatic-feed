@@ -3,17 +3,24 @@ package ru.kulikovd.prismaticfeed
 import akka.actor.{ActorSystem, Props}
 import akka.io.IO
 import spray.can.Http
+import com.typesafe.config.ConfigFactory
 
 
 object Main extends App {
-  
+
   implicit val system = ActorSystem()
 
-  import system.dispatcher
+  val config = ConfigFactory.load().getConfig("prismaticfeed")
 
-  system.actorOf(Props[PrismaticParser])
+  val parser = system.actorOf(Props(new PrismaticParser(
+    config.getString("username"),
+    config.getString("password")
+  )))
 
-  val handler = system.actorOf(Props[FeedGenerator])
+  val feedStorage = system.actorOf(Props(new FeedStorage(parser)))
 
-  IO(Http) ! Http.Bind(handler, interface = "localhost", port = 8088)
+  feedStorage ! UpdateFeed
+
+
+  IO(Http) ! Http.Bind(system.actorOf(Props(new FeedGenerator(feedStorage))), interface = "localhost", port = config.getInt("port"))
 }
