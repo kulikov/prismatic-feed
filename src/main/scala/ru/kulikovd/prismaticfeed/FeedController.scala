@@ -37,7 +37,7 @@ class FeedController(feedGenerator: ActorRef) extends Actor with ActorLogging {
           originalSender ! HttpResponse(status = 500, entity = other.toString)
       }
 
-    case _: HttpRequest => sender ! HttpResponse(status = 404, entity = "404 — Unknown resource!")
+    case r: HttpRequest => sender ! HttpResponse(status = 404, entity = s"404 — Unknown resource ${r.uri}!")
 
     case Timedout(HttpRequest(method, uri, _, _, _)) =>
       sender ! HttpResponse(status = 500, entity = s"The $method request to '$uri' has timed out...")
@@ -63,7 +63,7 @@ class FeedController(feedGenerator: ActorRef) extends Actor with ActorLogging {
       items map { case (id, JsObject(doc)) ⇒
         <item>
           <title>{doc("title").cdata}</title>
-          <link>{doc("url").s}</link>xml.Utility.serialize()
+          <link>{doc("url").s}</link>
           <guid isPermaLink="false">{doc("id").s}</guid>
           <pubDate>{doc("date").date}</pubDate>
           <description>{doc("text").cdata}</description>
