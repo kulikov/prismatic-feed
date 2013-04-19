@@ -44,7 +44,7 @@ class PrismaticParser(username: String, password: String) extends Actor with Act
     )) onComplete {
       case Success(res) ⇒
         log.info("Feed successfully loaded!")
-        client ! FeedResult(generateRssFeed(res.entity.asString))
+        client ! FeedResult(generateRssFeed(res.entity.asString).toString())
 
       case Failure(e) ⇒
         log.info("Auth expired {}", e)
@@ -52,15 +52,34 @@ class PrismaticParser(username: String, password: String) extends Actor with Act
     }
   }
 
-  def generateRssFeed(json: String) = {
-    JsonParser(json).asJsObject.fields.get("docs") collect {
-      case JsArray(docs) ⇒ docs map {
-        case JsObject(doc) ⇒ doc("id") + " / " + doc("title") + "\n" + doc("url") + "\n" + doc("text")
-      }
-    } map {
-      res ⇒ res.mkString("\n\n\n")
-    } getOrElse("<empty>")
+  implicit class JsonString(val json: JsValue) {
+    def s = json match {
+      case JsString(value) ⇒ value
+      case other ⇒ other.toString()
+    }
+
+    def sd = xml.PCData(s)
   }
+
+  def generateRssFeed(json: String) =
+    <rss version="2.0">
+    <channel>
+    <title>Prismatic RSS feed</title>
+    <link>http://www.example.com/rss</link>
+    {
+      JsonParser(json).asJsObject.fields("docs") match {
+        case JsArray(docs) ⇒ docs map { case JsObject(doc) ⇒
+          <item>
+            <title>{doc("title").sd}</title>
+            <link>{doc("url").s}</link>xml.Utility.serialize()
+            <guid isPermaLink="false">{doc("id").s}</guid>
+            <description>{doc("text").sd}</description>
+          </item>
+        }
+      }
+    }
+    </channel>
+    </rss>
 
   def updateAuthToken(client: ActorRef) {
     self ? UpdateAuthCookies onComplete {

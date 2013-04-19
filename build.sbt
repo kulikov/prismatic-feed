@@ -1,3 +1,5 @@
+import AssemblyKeys._
+
 organization := "ru.kulikovd"
 
 name := "prismatic-feed"
@@ -9,6 +11,8 @@ scalaVersion := "2.10.1"
 scalacOptions ++= Seq("-language:postfixOps", "-feature")
 
 resolvers += "Typesafe Repository" at "http://repo.typesafe.com/typesafe/releases/"
+
+assemblySettings
 
 libraryDependencies ++= Seq(
   "com.typesafe.akka" %% "akka-actor" % "2.1.2",
