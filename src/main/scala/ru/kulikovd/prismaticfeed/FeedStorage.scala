@@ -1,15 +1,18 @@
 package ru.kulikovd.prismaticfeed
 
+import scala.collection.immutable.TreeMap
 import scala.concurrent.duration._
 import scala.util.{Success, Failure}
 
 import akka.actor.{ActorLogging, Actor, ActorRef}
 import akka.pattern.ask
 import akka.util.Timeout
+import spray.json.JsObject
 
 
 case object GetFeed
 case object UpdateFeed
+case class SortedFeedItems(items: TreeMap[Long, JsObject])
 
 
 class FeedStorage(parser: ActorRef, updateInterval: FiniteDuration) extends Actor with ActorLogging {
@@ -17,28 +20,27 @@ class FeedStorage(parser: ActorRef, updateInterval: FiniteDuration) extends Acto
 
   implicit val timeout = Timeout(15 seconds)
 
-  var feed: Option[String] = None
+  var feed = TreeMap.empty[Long, JsObject]
 
   def receive = {
-    case GetFeed ⇒ feed match {
-      case Some(text) ⇒ sender ! FeedResult(text)
-      case None ⇒
-        val originalSender = sender
+    case GetFeed ⇒
+      if (feed.isEmpty) updateFeed(Some(sender))
+      else sender ! SortedFeedItems(feed)
 
-        parser ? LoadFeed onComplete {
-          case Success(result: FeedResult) ⇒
-            feed = Some(result.value)
-            originalSender ! result
-            context.system.scheduler.scheduleOnce(updateInterval, self, UpdateFeed)
+    case UpdateFeed ⇒ updateFeed()
+  }
 
-          case Failure(e) ⇒
-            log.error("Error {}!", e)
-            context.system.scheduler.scheduleOnce(3 minutes, self, UpdateFeed) // retry after timeout
-        }
+  def updateFeed(client: Option[ActorRef] = None) {
+    parser ? LoadFeed onComplete {
+      case Success(FeedItems(items)) ⇒
+        feed ++= items
+        feed = feed.takeRight(30)
+        client foreach (_ ! SortedFeedItems(feed))
+        context.system.scheduler.scheduleOnce(updateInterval, self, UpdateFeed)
+
+      case error ⇒
+        log.error("Error {}!", error)
+        context.system.scheduler.scheduleOnce(3 minutes, self, UpdateFeed) // retry after timeout
     }
-
-    case UpdateFeed ⇒
-      feed = None // invalidate cache
-      self ! GetFeed
   }
 }

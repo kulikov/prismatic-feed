@@ -17,7 +17,7 @@ case object GetAuthToken
 case object LoadFeed
 case object AuthExpired
 case class UpdateAuthCookies(value: String)
-case class FeedResult(value: String)
+case class FeedItems(items: Map[Long, JsObject])
 case class AuthError(reason: String)
 
 
@@ -29,12 +29,14 @@ class PrismaticParser(username: String, password: String) extends Actor with Act
   var authCookies: Option[String] = None
 
   def receive = {
-    case LoadFeed ⇒ authCookies match {
-      case Some(auth) ⇒ returnFeed(sender, auth)
-      case None ⇒ updateAuthToken(sender)
-    }
+    case LoadFeed ⇒
+      authCookies match {
+        case Some(auth) ⇒ returnFeed(sender, auth)
+        case None ⇒ updateAuthToken(sender)
+      }
 
-    case UpdateAuthCookies ⇒ authinticate()
+    case UpdateAuthCookies ⇒
+      authinticate()
   }
 
   def returnFeed(client: ActorRef, auth: String) {
@@ -44,7 +46,7 @@ class PrismaticParser(username: String, password: String) extends Actor with Act
     )) onComplete {
       case Success(res) ⇒
         log.info("Feed successfully loaded!")
-        client ! FeedResult(generateRssFeed(res.entity.asString).toString())
+        client ! FeedItems(parseFeed(res.entity.asString))
 
       case Failure(e) ⇒
         log.info("Auth expired {}", e)
@@ -52,34 +54,12 @@ class PrismaticParser(username: String, password: String) extends Actor with Act
     }
   }
 
-  implicit class JsonString(val json: JsValue) {
-    def s = json match {
-      case JsString(value) ⇒ value
-      case other ⇒ other.toString()
+  def parseFeed(json: String): Map[Long, JsObject] =
+    JsonParser(json).asJsObject.fields("docs") match {
+      case JsArray(docs) ⇒ docs.collect({ case doc: JsObject ⇒
+        doc.fields("id").asInstanceOf[JsNumber].value.toLong → doc
+      }).toMap
     }
-
-    def sd = xml.PCData(s)
-  }
-
-  def generateRssFeed(json: String) =
-    <rss version="2.0">
-    <channel>
-    <title>Prismatic RSS feed</title>
-    <link>http://www.example.com/rss</link>
-    {
-      JsonParser(json).asJsObject.fields("docs") match {
-        case JsArray(docs) ⇒ docs map { case JsObject(doc) ⇒
-          <item>
-            <title>{doc("title").sd}</title>
-            <link>{doc("url").s}</link>xml.Utility.serialize()
-            <guid isPermaLink="false">{doc("id").s}</guid>
-            <description>{doc("text").sd}</description>
-          </item>
-        }
-      }
-    }
-    </channel>
-    </rss>
 
   def updateAuthToken(client: ActorRef) {
     self ? UpdateAuthCookies onComplete {
