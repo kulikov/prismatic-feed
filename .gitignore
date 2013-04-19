@@ -1,0 +1,10 @@
+*~
+project/boot/
+project/build/target/
+project/plugins/project/build.properties
+target/
+*.eml
+*.ipr
+*.iws
+.*.sw?
+.idea
