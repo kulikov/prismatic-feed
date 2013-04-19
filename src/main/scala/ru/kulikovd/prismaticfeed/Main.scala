@@ -1,5 +1,7 @@
 package ru.kulikovd.prismaticfeed
 
+import scala.concurrent.duration.FiniteDuration
+
 import akka.actor.{ActorSystem, Props}
 import akka.io.IO
 import com.typesafe.config.ConfigFactory
@@ -17,10 +19,11 @@ object Main extends App {
     config.getString("password")
   )))
 
-  val feedStorage = system.actorOf(Props(new FeedStorage(parser)))
+  val updateInterval = config.getString("update-interval").split(" ")
 
-  feedStorage ! UpdateFeed
+  val feedStorage = system.actorOf(Props(
+    new FeedStorage(parser, FiniteDuration(updateInterval.head.toLong, updateInterval.lastOption.getOrElse("millis")))
+  ))
 
-
-  IO(Http) ! Http.Bind(system.actorOf(Props(new FeedGenerator(feedStorage))), interface = "localhost", port = config.getInt("port"))
+  IO(Http) ! Http.Bind(system.actorOf(Props(new FeedController(feedStorage))), interface = "localhost", port = config.getInt("port"))
 }

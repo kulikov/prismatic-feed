@@ -12,7 +12,7 @@ case object GetFeed
 case object UpdateFeed
 
 
-class FeedStorage(parser: ActorRef) extends Actor with ActorLogging {
+class FeedStorage(parser: ActorRef, updateInterval: FiniteDuration) extends Actor with ActorLogging {
   import context.dispatcher
 
   implicit val timeout = Timeout(15 seconds)
@@ -29,17 +29,16 @@ class FeedStorage(parser: ActorRef) extends Actor with ActorLogging {
           case Success(result: FeedResult) ⇒
             feed = Some(result.value)
             originalSender ! result
+            context.system.scheduler.scheduleOnce(updateInterval, self, UpdateFeed)
 
           case Failure(e) ⇒
             log.error("Error {}!", e)
+            context.system.scheduler.scheduleOnce(3 minutes, self, UpdateFeed) // retry after timeout
         }
     }
 
     case UpdateFeed ⇒
-      feed = None
-      self ? GetFeed onComplete {
-        case Success(_) ⇒ context.system.scheduler.scheduleOnce(1 hour, self, UpdateFeed)
-        case Failure(_) ⇒ context.system.scheduler.scheduleOnce(3 minutes, self, UpdateFeed)
-      }
+      feed = None // invalidate cache
+      self ! GetFeed
   }
 }

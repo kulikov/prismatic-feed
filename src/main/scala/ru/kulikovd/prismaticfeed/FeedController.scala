@@ -4,19 +4,20 @@ import scala.concurrent.duration._
 import scala.util.Success
 
 import akka.actor.{ActorRef, ActorLogging, Actor}
+import akka.event.LoggingReceive
 import akka.pattern.ask
 import akka.util.Timeout
 import spray.can.Http
-import spray.http._
 import spray.http.HttpMethods._
+import spray.http._
 
 
-class FeedGenerator(feedGenerator: ActorRef) extends Actor with ActorLogging {
+class FeedController(feedGenerator: ActorRef) extends Actor with ActorLogging {
   import context.dispatcher
 
   implicit val timeout = Timeout(20 seconds)
 
-  def receive = {
+  def receive = LoggingReceive {
     case _: Http.Connected => sender ! Http.Register(self)
 
     case HttpRequest(GET, Uri.Path("/feed"), _, _, _) =>
