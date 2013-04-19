@@ -1,23 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <configuration>
 
-    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
-        <target>System.out</target>
-        <encoder>
-            <pattern>%date{MM/dd HH:mm:ss.SSS} %-5level[%.15thread] %logger{1} - %msg%n</pattern>
-        </encoder>
-    </appender>
+  <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+    <withJansi>true</withJansi>
+    <encoder>
+      <pattern>%highlight(%.-3level) %cyan(%d{HH:mm:ss.SSS}) %yellow(%-26.26replace(%X{akkaSource}){'akka://default/user/', ''}) %highlight(%msg) %n </pattern>
+    </encoder>
+  </appender>
 
-    <!-- <appender name="FILE" class="ch.qos.logback.core.FileAppender">
-        <file>akka.log</file>
-        <append>false</append>
-        <encoder>
-            <pattern>%date{MM/dd HH:mm:ss} %-5level[%thread] %logger{1} - %msg%n</pattern>
-        </encoder>
-    </appender> -->
-
-    <root level="INFO">
-        <appender-ref ref="CONSOLE"/>
-    </root>
+  <root level="debug">
+    <appender-ref ref="STDOUT"/>
+  </root>
 
 </configuration>
