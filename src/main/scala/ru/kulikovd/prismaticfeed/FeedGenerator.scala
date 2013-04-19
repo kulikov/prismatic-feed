@@ -1,6 +1,7 @@
 package ru.kulikovd.prismaticfeed
 
 import scala.concurrent.duration._
+import scala.util.Success
 
 import akka.actor.{ActorRef, ActorLogging, Actor}
 import akka.pattern.ask
@@ -8,7 +9,6 @@ import akka.util.Timeout
 import spray.can.Http
 import spray.http._
 import spray.http.HttpMethods._
-import scala.util.Success
 
 
 class FeedGenerator(feedGenerator: ActorRef) extends Actor with ActorLogging {

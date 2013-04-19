@@ -2,8 +2,8 @@ package ru.kulikovd.prismaticfeed
 
 import akka.actor.{ActorSystem, Props}
 import akka.io.IO
-import spray.can.Http
 import com.typesafe.config.ConfigFactory
+import spray.can.Http
 
 
 object Main extends App {

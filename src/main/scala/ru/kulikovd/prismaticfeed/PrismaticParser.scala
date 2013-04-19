@@ -8,8 +8,8 @@ import akka.pattern.ask
 import akka.util.Timeout
 import spray.client.pipelining._
 import spray.http._
-import spray.http.HttpHeaders.`Set-Cookie`
 import spray.http.HttpHeaders.RawHeader
+import spray.http.HttpHeaders.`Set-Cookie`
 import spray.json._
 
 
