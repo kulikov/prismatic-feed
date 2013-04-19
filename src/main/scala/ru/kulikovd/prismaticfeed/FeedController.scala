@@ -37,7 +37,7 @@ class FeedController(feedGenerator: ActorRef) extends Actor with ActorLogging {
           originalSender ! HttpResponse(status = 500, entity = other.toString)
       }
 
-    case r: HttpRequest => sender ! HttpResponse(status = 404, entity = s"404 — Unknown resource ${r.uri}!")
+    case r: HttpRequest => sender ! HttpResponse(status = 404, entity = s"404 — Unknown resource ${r.uri.path}!")
 
     case Timedout(HttpRequest(method, uri, _, _, _)) =>
       sender ! HttpResponse(status = 500, entity = s"The $method request to '$uri' has timed out...")
