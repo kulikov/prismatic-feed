@@ -29,8 +29,8 @@ class FeedController(feedGenerator: ActorRef) extends Actor with ActorLogging {
       feedGenerator ? GetFeed onComplete {
         case Success(SortedFeedItems(items)) ⇒
           originalSender ! HttpResponse(entity =
-            HttpBody(ContentType(MediaTypes.`application/rss+xml`, HttpCharsets.`UTF-8`),
-            generateRss(items).toString()
+            HttpBody(ContentType(MediaTypes.`text/xml`, HttpCharsets.`UTF-8`),
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" + generateRss(items).toString()
           ))
 
         case other ⇒
@@ -49,27 +49,33 @@ class FeedController(feedGenerator: ActorRef) extends Actor with ActorLogging {
       case other ⇒ other.toString()
     }
 
-    def cdata: PCData = xml.PCData(s)
+    def cdata: PCData = xml.PCData(s.replaceAll("\\n", "<br/>"))
 
     def date = DateTime(s.toLong).toRfc1123DateTimeString
+
+    def field(name: String, default: String = "") = json match {
+      case JsObject(fields) if (fields.contains(name)) ⇒ fields(name).s
+      case _ ⇒ default
+    }
   }
 
   def generateRss(items: TreeMap[Long, JsObject]) =
     <rss version="2.0">
-    <channel>
-    <title>Prismatic RSS feed</title>
-    <link>http://kulikovd.ru/prismatic/feed</link>
-    {
-      items map { case (id, JsObject(doc)) ⇒
-        <item>
-          <title>{doc("title").cdata}</title>
-          <link>{doc("url").s}</link>
-          <guid isPermaLink="false">{doc("id").s}</guid>
-          <pubDate>{doc("date").date}</pubDate>
-          <description>{doc("text").cdata}</description>
-        </item>
+      <channel>
+      <title>Prismatic RSS feed</title>
+      <link>http://kulikovd.ru/prismatic/feed</link>
+      {
+        items collect { case (id, JsObject(doc)) ⇒
+          <item>
+            <title>{doc("title").cdata}</title>
+            <link>{doc("url").s}</link>
+            <guid isPermaLink="false">{doc("id").s}</guid>
+            <pubDate>{doc("date").date}</pubDate>
+            <author>{doc("author").field("name", "-")} / {doc("feed").field("title")}</author>
+            <description>{doc("text").cdata}</description>
+          </item>
+        }
       }
-    }
-    </channel>
+      </channel>
     </rss>
 }
