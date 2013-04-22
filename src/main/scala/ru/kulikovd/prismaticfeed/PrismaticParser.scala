@@ -65,6 +65,10 @@ class PrismaticParser(username: String, password: String) extends Actor with Act
       case JsArray(docs) ⇒ docs.collect({ case doc: JsObject ⇒
         doc.fields("id").asInstanceOf[JsNumber].value.toLong → doc
       }).toMap
+
+      case other ⇒
+        log.error("Malformed json format {}", other)
+        Map.empty
     }
 
   def updateAuthToken(client: ActorRef) {
@@ -79,6 +83,9 @@ class PrismaticParser(username: String, password: String) extends Actor with Act
     }
   }
 
+  /**
+   * Gat auth cookies form Prismatic
+   */
   def authinticate() {
     val originalSender = sender
 
@@ -92,16 +99,11 @@ class PrismaticParser(username: String, password: String) extends Actor with Act
       case HttpResponse(StatusCodes.OK, _, headers, _) ⇒
         AWSELB = cookie(headers, "AWSELB")
 
-        sendReceive.apply(HttpRequest(
-          method = HttpMethods.POST,
-          uri = "http://auth.getprismatic.com/auth/event_public_dispatch?api-version=1.0&ignore=true&whitelist_url=http%3A%2F%2Fgetprismatic.com%2Fnews%2Fhome&soon_url=http%3A%2F%2Fgetprismatic.com%2Fwelcome&create_url=http%3A%2F%2Fgetprismatic.com%2Fcreateaccount&resetpassword_url=http%3A%2F%2Fgetprismatic.com%2Fresetpassword",
-          headers = List(
-            RawHeader("Cookie", AWSELB),
-            RawHeader("Content-Type", "application/json"),
-            RawHeader("Referer", "http://auth.getprismatic.com/receiver.html"),
-            RawHeader("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_7_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/27.0.1453.56 Safari/537.36")
-          ),
-          entity = HttpBody(ContentType.`application/json`, """{"category":"load","page":{"uri":"/","search":"","referer":"http://getprismatic.com/news/home"},"browser":"Chrome 27 (Mac)","type":"landing"}""")
+        sendReceive apply Post(
+          "http://auth.getprismatic.com/auth/event_public_dispatch?api-version=1.0",
+          HttpBody(ContentType.`application/json`, """{"category":"load","page":{"uri":"/","search":"","referer":""},"browser":"","type":"landing"}""")
+        ).withHeaders(List(
+          RawHeader("Cookie", AWSELB)
         ))
 
     } flatMap {
@@ -109,30 +111,21 @@ class PrismaticParser(username: String, password: String) extends Actor with Act
         pPublic = cookie(headers, "p_public")
         val psWww = cookie(headers, "_ps_www")
 
-        sendReceive.apply(HttpRequest(
-          method = HttpMethods.POST,
-          uri = "http://auth.getprismatic.com/auth/login?api-version=1.0&ignore=true&whitelist_url=http%3A%2F%2Fgetprismatic.com%2Fnews%2Fhome&soon_url=http%3A%2F%2Fgetprismatic.com%2Fwelcome&create_url=http%3A%2F%2Fgetprismatic.com%2Fcreateaccount&resetpassword_url=http%3A%2F%2Fgetprismatic.com%2Fresetpassword",
-          headers = List(
-            RawHeader("Cookie", List(AWSELB, pPublic, psWww) mkString "; "),
-            RawHeader("Content-Type", "application/json"),
-            RawHeader("Referer", "http://auth.getprismatic.com/receiver.html"),
-            RawHeader("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_7_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/27.0.1453.56 Safari/537.36")
-          ),
-          entity = HttpBody(ContentType.`application/json`, """{"handle":"%s","password":"%s"}""".format(username, password))
+        sendReceive apply Post(
+          "http://auth.getprismatic.com/auth/login?api-version=1.0&ignore=true&whitelist_url=http%3A%2F%2Fgetprismatic.com%2Fnews%2Fhome",
+          HttpBody(ContentType.`application/json`, """{"handle":"%s","password":"%s"}""".format(username, password))
+        ).withHeaders(List(
+          RawHeader("Cookie", List(AWSELB, pPublic, psWww) mkString "; ")
         ))
 
     } flatMap {
       case HttpResponse(StatusCodes.OK, _, headers, _) ⇒
         val prismatic = cookie(headers, "prismatic")
 
-        sendReceive.apply(HttpRequest(
-          method = HttpMethods.GET,
-          uri = "http://api.getprismatic.com/user/info?rand=21701246&callback=prismatic.userPromise.fulfill&api-version=1.0",
-          headers = List(
-            RawHeader("Cookie", List(pPublic, prismatic) mkString "; "),
-            RawHeader("Referer", "http://getprismatic.com/news/home"),
-            RawHeader("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_7_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/27.0.1453.56 Safari/537.36")
-          )
+        sendReceive apply Get(
+          "http://api.getprismatic.com/user/info?rand=21701246&callback=prismatic.userPromise.fulfill&api-version=1.0"
+        ).withHeaders(List(
+          RawHeader("Cookie", List(pPublic, prismatic) mkString "; ")
         ))
 
     } onComplete {
