@@ -46,7 +46,15 @@ class PrismaticParser(username: String, password: String) extends Actor with Act
     )) onComplete {
       case Success(res) ⇒
         log.info("Feed successfully loaded!")
-        client ! FeedItems(parseFeed(res.entity.asString))
+
+        try {
+          client ! FeedItems(parseFeed(res.entity.asString))
+        } catch {
+          case e: Exception ⇒
+            log.error("Error parse feed response from Prismatic: {}", e)
+            log.error("Reason: {}", e.getStackTraceString)
+            log.error("Response: {}", res)
+        }
 
       case Failure(e) ⇒
         log.info("Auth expired {}", e)
