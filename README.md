@@ -3,4 +3,6 @@ Prismatic feed generator
 
 Export Prismatic private news feed into RSS
 
-Demo: http://kulikovd.ru/prismatic/feed
+Demo: 
+Private feed — http://kulikovd.ru/prismatic/feed
+Public feed for user `kulikov` — http://kulikovd.ru/prismatic/public/kulikov
