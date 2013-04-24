@@ -49,6 +49,7 @@ class PrismaticParser(username: String, password: String) extends Actor with Act
       headers = List(RawHeader("Cookie", auth))
     ))
 
+
   private def request(client: ActorRef)(ff: (ActorRef, String) ⇒ Future[HttpResponse]) {
     authCookies map (Future.successful) getOrElse authinticate onComplete {
       case Success(auth: String) ⇒
@@ -65,16 +66,20 @@ class PrismaticParser(username: String, password: String) extends Actor with Act
                 log.error("Response: {}", entity)
             }
 
-          case error ⇒
-            log.warning("Feed request failed: {}", error)
+          case Success(HttpResponse(StatusCodes.Forbidden, entity, _, _)) ⇒
+            log.warning("Prismatic's forbidden: {}", entity)
             authCookies = None
-            request(client)(ff)
+            request(client)(ff) // retry again with new auth cookies
+
+          case other ⇒
+            log.error("Prismatic server error: {}", other)
+            client ! other
         }
 
-      case error ⇒
-        log.warning("Auth token expired! Try auth again. {}", error)
+      case authError ⇒
+        log.warning("Auth error! Try again after timeout. {}", authError)
         authCookies = None
-        request(client)(ff)
+        context.system.scheduler.scheduleOnce(5 seconds)(request(client)(ff))
     }
   }
 

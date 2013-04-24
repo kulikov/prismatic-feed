@@ -1,6 +1,5 @@
 package ru.kulikovd.prismaticfeed
 
-import scala.collection.immutable.TreeMap
 import scala.concurrent.duration._
 
 import akka.actor.{ActorRef, Actor}
@@ -13,31 +12,31 @@ import spray.routing.HttpService
 class RssHttpServer(feedStorage: ActorRef) extends Actor with HttpService {
   import context.dispatcher
 
-  def actorRefFactory = context
-
   implicit val timeout = Timeout(20 seconds)
+
+  def actorRefFactory = context
 
   def receive = runRoute {
     get {
       path("feed") {
         respondWithMediaType(MediaTypes.`text/xml`) {
-          complete { feed(GetPrivateFeed) }
+          complete { feed(GetPrivateFeed, "Prismatic RSS feed") }
         }
       } ~
-      path("public" / Segment) { user ⇒
+      path("public" / "[A-z0-9-_]+".r) { case user: String ⇒
         respondWithMediaType(MediaTypes.`text/xml`) {
-          complete { feed(GetPublicActivityFor(user)) }
+          complete { feed(GetPublicActivityFor(user), s"${user.capitalize}'s Prismatic activity") }
         }
       }
     }
   }
 
-  def feed(msg: AnyRef) = feedStorage ? msg collect {
+  def feed(msg: AnyRef, title: String) = feedStorage ? msg collect {
     case SortedFeedItems(items) ⇒
       "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
       <rss version="2.0">
         <channel>
-        <title>Prismatic RSS feed</title>
+        <title>{cdata(title)}</title>
         {
           items map { case (_, item) ⇒
             <item>
@@ -52,6 +51,9 @@ class RssHttpServer(feedStorage: ActorRef) extends Actor with HttpService {
         }
         </channel>
       </rss>
+
+    case error ⇒
+      <error>{cdata(error.toString)}</error>.toString()
   }
 
   private def cdata(s: String) = xml.PCData(s.replaceAll("\\n", "<br/>"))

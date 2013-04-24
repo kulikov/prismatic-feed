@@ -56,7 +56,6 @@ class FeedStorage(parser: ActorRef, updateInterval: FiniteDuration) extends Acto
 
       case error ⇒
         p.failure(new Exception(s"Error request $key feed by $msg. Reason: $error"))
-        context.system.scheduler.scheduleOnce(3 minutes, self, UpdateFeed(key, msg)) // retry after timeout
     }
 
     p.future
