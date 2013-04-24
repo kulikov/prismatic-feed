@@ -25,5 +25,5 @@ object Main extends App {
     new FeedStorage(parser, FiniteDuration(updateInterval.head.toLong, updateInterval.lastOption.getOrElse("millis")))
   ))
 
-  IO(Http) ! Http.Bind(system.actorOf(Props(new FeedController(feedStorage))), interface = "localhost", port = config.getInt("port"))
+  IO(Http) ! Http.Bind(system.actorOf(Props(new RssHttpServer(feedStorage))), interface = "localhost", port = config.getInt("port"))
 }

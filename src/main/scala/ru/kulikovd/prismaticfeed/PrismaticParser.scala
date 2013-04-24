@@ -1,10 +1,10 @@
 package ru.kulikovd.prismaticfeed
 
+import scala.concurrent.{Promise, Future}
 import scala.concurrent.duration._
 import scala.util.Success
 
 import akka.actor._
-import akka.pattern.ask
 import akka.util.Timeout
 import spray.client.pipelining._
 import spray.http._
@@ -13,12 +13,10 @@ import spray.http.HttpHeaders.`Set-Cookie`
 import spray.json._
 
 
-case object GetAuthToken
-case object LoadFeed
-case object AuthExpired
-case class UpdateAuthCookies(value: String)
-case class FeedItems(items: Map[Long, JsObject])
-case class AuthError(reason: String)
+case object GetPrivateFeed
+case class GetPublicActivityFor(username: String)
+case class FeedItems(items: Map[Long, FeedItem])
+case class FeedItem(id: Long, title: String, url: String, date: Long, author: String, text: String)
 
 
 class PrismaticParser(username: String, password: String) extends Actor with ActorLogging {
@@ -29,65 +27,101 @@ class PrismaticParser(username: String, password: String) extends Actor with Act
   var authCookies: Option[String] = None
 
   def receive = {
-    case LoadFeed ⇒
-      authCookies match {
-        case Some(auth) ⇒ returnFeed(sender, auth)
-        case None ⇒ updateAuthToken(sender)
-      }
-
-    case UpdateAuthCookies ⇒ authinticate()
+    case GetPrivateFeed             ⇒ request(sender)(privateFeed)
+    case GetPublicActivityFor(user) ⇒ request(sender)(publicActivity(user))
   }
 
-  def returnFeed(client: ActorRef, auth: String) {
+  /**
+   * Private user feed
+   */
+  def privateFeed(client: ActorRef, auth: String) =
     sendReceive.apply(HttpRequest(
       uri = "http://api.getprismatic.com/news/home",
       headers = List(RawHeader("Cookie", auth))
-    )) onComplete {
-      case Success(HttpResponse(StatusCodes.OK, entity, _, _)) ⇒
-        log.info("Feed successfully loaded!")
+    ))
 
-        try {
-          client ! FeedItems(parseFeed(entity.asString))
-        } catch {
-          case e: Exception ⇒
-            log.error("Error parse feed response from Prismatic: {} \n {}", e, e.getStackTraceString)
-            log.error("Response: {}", entity)
+  /**
+   * Public activity for $user
+   */
+  def publicActivity(user: String)(client: ActorRef, auth: String) =
+    sendReceive.apply(HttpRequest(
+      uri = "http://api.getprismatic.com/news/activity/" + user,
+      headers = List(RawHeader("Cookie", auth))
+    ))
+
+  private def request(client: ActorRef)(ff: (ActorRef, String) ⇒ Future[HttpResponse]) {
+    authCookies map (Future.successful) getOrElse authinticate onComplete {
+      case Success(auth: String) ⇒
+        authCookies = Some(auth)
+        ff(client, auth) onComplete {
+          case Success(HttpResponse(StatusCodes.OK, entity, _, _)) ⇒
+            log.info("Feed successfully loaded!")
+
+            try {
+              client ! FeedItems(parseResults(entity.asString))
+            } catch {
+              case e: Exception ⇒
+                log.error("Error parse feed response from Prismatic: {} \n {}", e, e.getStackTraceString)
+                log.error("Response: {}", entity)
+            }
+
+          case error ⇒
+            log.warning("Feed request failed: {}", error)
+            authCookies = None
+            request(client)(ff)
         }
 
       case error ⇒
-        log.warning("Feed request failed: {}", error)
-        updateAuthToken(client)
+        log.warning("Auth token expired! Try auth again. {}", error)
+        authCookies = None
+        request(client)(ff)
     }
   }
 
-  def parseFeed(json: String): Map[Long, JsObject] =
+  implicit private class JsonExtractors(val json: JsValue) {
+    def s: String = json match {
+      case JsString(value) ⇒ value
+      case other ⇒ other.toString()
+    }
+
+    def n: Long = json match {
+      case JsNumber(value) ⇒ value.toLong
+      case other ⇒ 0L
+    }
+
+    def f(name: String) = json match {
+      case JsObject(fields) if (fields.contains(name)) ⇒ fields(name).s
+      case _ ⇒ ""
+    }
+  }
+
+  /**
+   * Parse json string
+   */
+  private def parseResults(json: String): Map[Long, FeedItem] =
     JsonParser(json).asJsObject.fields("docs") match {
-      case JsArray(docs) ⇒ docs.collect({ case doc: JsObject ⇒
-        doc.fields("id").asInstanceOf[JsNumber].value.toLong → doc
-      }).toMap
+      case JsArray(docs) ⇒
+        docs.collect({ case JsObject(fs) ⇒
+          FeedItem(
+            id     = fs("id").n,
+            title  = fs("title").s,
+            url    = fs("url").s,
+            date   = fs("date").n,
+            author = fs("author").f("name") + " / " + fs("feed").f("title"),
+            text   = fs("text").s
+          )
+        }).map(f ⇒ f.id → f).toMap
 
       case other ⇒
         log.error("Malformed json format {}", other)
         Map.empty
     }
 
-  def updateAuthToken(client: ActorRef) {
-    self ? UpdateAuthCookies onComplete {
-      case Success(auth: String) ⇒
-        authCookies = Some(auth)
-        returnFeed(client, auth)
-
-      case other ⇒
-        log.error("Auth error {}", other)
-        client ! AuthError(other.toString)
-    }
-  }
-
   /**
    * Gat auth cookies form Prismatic
    */
-  def authinticate() {
-    val originalSender = sender
+  private def authinticate: Future[String] = {
+    val promise = Promise[String]()
 
     def cookie(headers: List[HttpHeader], cookieName: String) = headers.collect({
       case `Set-Cookie`(c) if (c.name == cookieName) ⇒ cookieName + "=" + c.content
@@ -130,10 +164,12 @@ class PrismaticParser(username: String, password: String) extends Actor with Act
 
     } onComplete {
       case Success(HttpResponse(StatusCodes.OK, _, headers, _)) ⇒
-        originalSender ! cookie(headers, "_ps_api") + "; " + cookie(headers, "AWSELB")
+        promise.success(cookie(headers, "_ps_api") + "; " + cookie(headers, "AWSELB"))
 
       case error ⇒
-        log.error("Failure get auth cookies {}", error)
+        promise.failure(new Exception("Failure get auth cookies " + error))
     }
+
+    promise.future
   }
 }
