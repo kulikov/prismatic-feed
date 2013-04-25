@@ -5,6 +5,8 @@ import scala.concurrent.duration._
 import akka.actor.{ActorRef, Actor}
 import akka.pattern.ask
 import akka.util.Timeout
+import spray.can.Http
+import spray.can.server.Stats
 import spray.http._
 import spray.routing.HttpService
 
@@ -27,11 +29,26 @@ class RssHttpServer(feedStorage: ActorRef) extends Actor with HttpService {
         respondWithMediaType(MediaTypes.`text/xml`) {
           complete { feed(GetPublicActivityFor(user), s"${user.capitalize}'s Prismatic activity") }
         }
+      } ~
+      path("stats") {
+        complete {
+          context.actorFor("/user/IO-HTTP/listener-0") ? Http.GetStats map {
+            case stats: Stats ⇒
+              "Uptime                : " + stats.uptime + '\n' +
+              "Total requests        : " + stats.totalRequests + '\n' +
+              "Open requests         : " + stats.openRequests + '\n' +
+              "Max open requests     : " + stats.maxOpenRequests + '\n' +
+              "Total connections     : " + stats.totalConnections + '\n' +
+              "Open connections      : " + stats.openConnections + '\n' +
+              "Max open connections  : " + stats.maxOpenConnections + '\n' +
+              "Requests timed out    : " + stats.requestTimeouts + '\n'
+          }
+        }
       }
     }
   }
 
-  def feed(msg: AnyRef, title: String) = feedStorage ? msg collect {
+  def feed(msg: FeedRequest, title: String) = feedStorage ? msg collect {
     case SortedFeedItems(items) ⇒
       "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
       <rss version="2.0">

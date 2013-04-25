@@ -13,8 +13,10 @@ import spray.http.HttpHeaders.`Set-Cookie`
 import spray.json._
 
 
-case object GetPrivateFeed
-case class GetPublicActivityFor(username: String)
+sealed trait FeedRequest
+case object GetPrivateFeed extends FeedRequest
+case class GetPublicActivityFor(username: String) extends FeedRequest
+
 case class FeedItems(items: Map[Long, FeedItem])
 case class FeedItem(id: Long, title: String, url: String, date: Long, author: String, text: String)
 
@@ -169,6 +171,7 @@ class PrismaticParser(username: String, password: String) extends Actor with Act
 
     } onComplete {
       case Success(HttpResponse(StatusCodes.OK, _, headers, _)) ⇒
+        log.info("Auth complete!")
         promise.success(cookie(headers, "_ps_api") + "; " + cookie(headers, "AWSELB"))
 
       case error ⇒

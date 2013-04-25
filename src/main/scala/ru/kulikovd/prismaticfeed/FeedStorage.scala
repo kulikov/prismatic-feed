@@ -11,7 +11,7 @@ import akka.util.Timeout
 
 
 case class SortedFeedItems(items: TreeMap[Long, FeedItem])
-case class UpdateFeed(key: String, msg: AnyRef)
+case class UpdateFeed(msg: FeedRequest)
 
 
 class FeedStorage(parser: ActorRef, updateInterval: FiniteDuration) extends Actor with ActorLogging {
@@ -20,19 +20,18 @@ class FeedStorage(parser: ActorRef, updateInterval: FiniteDuration) extends Acto
   implicit val timeout = Timeout(15 seconds)
   implicit val ordering = Ordering.ordered[Long].reverse
 
-  var feeds = collection.mutable.Map.empty[String, TreeMap[Long, FeedItem]]
+  var feeds = collection.mutable.Map.empty[FeedRequest, TreeMap[Long, FeedItem]]
 
   def receive = {
-    case msg @ GetPrivateFeed ⇒ prepare(sender, "private")(msg)
-    case msg @ GetPublicActivityFor(user) ⇒ prepare(sender, "public/" + user)(msg)
-    case UpdateFeed(key, msg) ⇒ updateFeed(key, msg)
+    case msg: FeedRequest ⇒ prepare(sender, msg)
+    case UpdateFeed(msg)  ⇒ updateFeed(msg)
   }
 
   /**
-   * If hasn't feed with name $key - request it from PrismaticParser, or return
+   * If hasn't feed for $msg - request it from PrismaticParser, or return
    */
-  def prepare(client: ActorRef, key: String)(msg: AnyRef) {
-    feeds.get(key) map (Future.successful) getOrElse (updateFeed(key, msg)) onComplete {
+  def prepare(client: ActorRef, msg: FeedRequest) {
+    feeds.get(msg) map (Future.successful) getOrElse (updateFeed(msg)) onComplete {
       case Success(items) ⇒
         client ! SortedFeedItems(items)
 
@@ -45,17 +44,19 @@ class FeedStorage(parser: ActorRef, updateInterval: FiniteDuration) extends Acto
   /**
    * Fetch new items for feed with name $key
    */
-  def updateFeed(key: String, msg: AnyRef) = {
+  def updateFeed(msg: FeedRequest) = {
     val p = Promise[TreeMap[Long, FeedItem]]()
+
+    log.info("Request feed by {}", msg)
 
     parser ? msg onComplete {
       case Success(FeedItems(items)) ⇒
-        feeds.update(key, (feeds.getOrElse(key, TreeMap.empty[Long, FeedItem]) ++ items).takeRight(20))
-        p.success(feeds(key))
-        context.system.scheduler.scheduleOnce(updateInterval, self, UpdateFeed(key, msg))
+        feeds.update(msg, (feeds.getOrElse(msg, TreeMap.empty[Long, FeedItem]) ++ items).takeRight(20))
+        p.success(feeds(msg))
+        context.system.scheduler.scheduleOnce(updateInterval, self, UpdateFeed(msg))
 
       case error ⇒
-        p.failure(new Exception(s"Error request $key feed by $msg. Reason: $error"))
+        p.failure(new Exception(s"Error request feed by $msg. Reason: $error"))
     }
 
     p.future
