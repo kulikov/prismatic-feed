@@ -5,20 +5,23 @@ import scala.concurrent.{Promise, Future}
 import scala.concurrent.duration._
 import scala.util.{Success, Failure}
 
-import akka.actor.{ActorLogging, Actor, ActorRef}
+import akka.actor.{Stash, ActorLogging, Actor, ActorRef}
 import akka.pattern.ask
 import akka.util.Timeout
 
 
 case class SortedFeedItems(items: TreeMap[Long, FeedItem])
-case class UpdateFeed(msg: FeedRequest)
 
 
-class FeedStorage(parser: ActorRef, updateInterval: FiniteDuration) extends Actor with ActorLogging {
+class FeedStorage(parser: ActorRef, updateInterval: FiniteDuration) extends Actor with Stash with ActorLogging {
   import context.dispatcher
+
+  import FeedStorageProtocol._
 
   implicit val timeout = Timeout(15 seconds)
   implicit val ordering = Ordering.ordered[Long].reverse
+
+  val MaxItemsByFeed = 30
 
   var feeds = collection.mutable.Map.empty[FeedRequest, TreeMap[Long, FeedItem]]
 
@@ -49,16 +52,36 @@ class FeedStorage(parser: ActorRef, updateInterval: FiniteDuration) extends Acto
 
     log.info("Request feed by {}", msg)
 
-    parser ? msg onComplete {
-      case Success(FeedItems(items)) ⇒
-        feeds.update(msg, (feeds.getOrElse(msg, TreeMap.empty[Long, FeedItem]) ++ items).takeRight(20))
+    context.become {
+      case UpdateComplete(items) ⇒
+        feeds.update(msg, (feeds.getOrElse(msg, TreeMap.empty[Long, FeedItem]) ++ items).take(MaxItemsByFeed))
         p.success(feeds(msg))
         context.system.scheduler.scheduleOnce(updateInterval, self, UpdateFeed(msg))
 
-      case error ⇒
-        p.failure(new Exception(s"Error request feed by $msg. Reason: $error"))
+        context.unbecome()
+        unstashAll()
+
+      case UpdateFailure(reason) ⇒
+        p.failure(reason)
+
+        context.unbecome()
+        unstashAll()
+
+      case _ ⇒ stash()
+    }
+
+    parser ? msg onComplete {
+      case Success(FeedItems(items)) ⇒ self ! UpdateComplete(items)
+      case error ⇒ self ! UpdateFailure(new Exception(s"Error request feed by $msg. Reason: $error"))
     }
 
     p.future
   }
+}
+
+
+private object FeedStorageProtocol {
+  case class UpdateFeed(msg: FeedRequest)
+  case class UpdateComplete(items: Map[Long, FeedItem])
+  case class UpdateFailure(reason: Throwable)
 }

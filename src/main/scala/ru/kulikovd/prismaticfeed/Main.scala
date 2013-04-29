@@ -1,6 +1,6 @@
 package ru.kulikovd.prismaticfeed
 
-import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.duration.Duration
 
 import akka.actor.{ActorSystem, Props}
 import akka.io.IO
@@ -19,11 +19,13 @@ object Main extends App {
     config.getString("password")
   )))
 
-  val updateInterval = config.getString("update-interval").split(" ")
-
   val feedStorage = system.actorOf(Props(
-    new FeedStorage(parser, FiniteDuration(updateInterval.head.toLong, updateInterval.lastOption.getOrElse("millis")))
+    new FeedStorage(parser, Duration(config.getMilliseconds("update-interval"), "ms"))
   ))
 
-  IO(Http) ! Http.Bind(system.actorOf(Props(new RssHttpServer(feedStorage))), interface = config.getString("host"), port = config.getInt("port"))
+  IO(Http) ! Http.Bind(
+    listener  = system.actorOf(Props(new RssService(feedStorage))),
+    interface = config.getString("host"),
+    port      = config.getInt("port")
+  )
 }

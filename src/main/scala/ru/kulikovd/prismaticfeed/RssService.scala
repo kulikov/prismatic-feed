@@ -11,7 +11,7 @@ import spray.http._
 import spray.routing.HttpService
 
 
-class RssHttpServer(feedStorage: ActorRef) extends Actor with HttpService {
+class RssService(feedStorage: ActorRef) extends Actor with HttpService {
   import context.dispatcher
 
   implicit val timeout = Timeout(20 seconds)
