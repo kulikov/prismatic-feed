@@ -142,7 +142,7 @@ class PrismaticParser(username: String, password: String) extends Actor with Act
 
         sendReceive apply Post(
           "http://auth.getprismatic.com/auth/event_public_dispatch?api-version=1.0",
-          HttpBody(ContentType.`application/json`, """{"category":"load","page":{"uri":"/","search":"","referer":""},"browser":"","type":"landing"}""")
+          HttpEntity(ContentType.`application/json`, """{"category":"load","page":{"uri":"/","search":"","referer":""},"browser":"","type":"landing"}""")
         ).withHeaders(List(
           RawHeader("Cookie", AWSELB)
         ))
@@ -154,7 +154,7 @@ class PrismaticParser(username: String, password: String) extends Actor with Act
 
         sendReceive apply Post(
           "http://auth.getprismatic.com/auth/login?api-version=1.0&ignore=true&whitelist_url=http%3A%2F%2Fgetprismatic.com%2Fnews%2Fhome",
-          HttpBody(ContentType.`application/json`, """{"handle":"%s","password":"%s"}""".format(username, password))
+          HttpEntity(ContentType.`application/json`, """{"handle":"%s","password":"%s"}""".format(username, password))
         ).withHeaders(List(
           RawHeader("Cookie", List(AWSELB, pPublic, psWww) mkString "; ")
         ))
