@@ -51,21 +51,22 @@ class FeedStorage(parser: ActorRef, updateInterval: FiniteDuration) extends Acto
     val p = Promise[TreeMap[Long, FeedItem]]()
 
     log.info("Request feed by {}", msg)
+    
+    def complete() {
+      context.system.scheduler.scheduleOnce(updateInterval, self, UpdateFeed(msg))
+      context.unbecome()
+      unstashAll()
+    }
 
     context.become {
       case UpdateComplete(items) ⇒
         feeds.update(msg, (feeds.getOrElse(msg, TreeMap.empty[Long, FeedItem]) ++ items).take(MaxItemsByFeed))
         p.success(feeds(msg))
-        context.system.scheduler.scheduleOnce(updateInterval, self, UpdateFeed(msg))
-
-        context.unbecome()
-        unstashAll()
+        complete()
 
       case UpdateFailure(reason) ⇒
         p.failure(reason)
-
-        context.unbecome()
-        unstashAll()
+        complete()
 
       case _ ⇒ stash()
     }
