@@ -1,5 +1,6 @@
 package ru.kulikovd.prismaticfeed
 
+import java.util.concurrent.TimeUnit
 import scala.concurrent.duration._
 
 import akka.actor.{ActorRef, Actor}
@@ -34,14 +35,16 @@ class RssService(feedStorage: ActorRef) extends Actor with HttpService {
         complete {
           context.actorFor("/user/IO-HTTP/listener-0") ? Http.GetStats map {
             case stats: Stats ⇒
-              "Uptime                : " + stats.uptime + '\n' +
-              "Total requests        : " + stats.totalRequests + '\n' +
-              "Open requests         : " + stats.openRequests + '\n' +
-              "Max open requests     : " + stats.maxOpenRequests + '\n' +
-              "Total connections     : " + stats.totalConnections + '\n' +
-              "Open connections      : " + stats.openConnections + '\n' +
-              "Max open connections  : " + stats.maxOpenConnections + '\n' +
-              "Requests timed out    : " + stats.requestTimeouts + '\n'
+              s"""
+              | Uptime                : ${Duration(stats.uptime.toHours, TimeUnit.HOURS)}
+              | Total requests        : ${stats.totalRequests}
+              | Open requests         : ${stats.openRequests}
+              | Max open requests     : ${stats.maxOpenRequests}
+              | Total connections     : ${stats.totalConnections}
+              | Open connections      : ${stats.openConnections}
+              | Max open connections  : ${stats.maxOpenConnections}
+              | Requests timed out    : ${stats.requestTimeouts}
+              """.trim.stripMargin
           }
         }
       }

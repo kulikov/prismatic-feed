@@ -69,7 +69,7 @@ class PrismaticParser(username: String, password: String) extends Actor with Act
             }
 
           case Success(HttpResponse(StatusCodes.Forbidden, entity, _, _)) ⇒
-            log.warning("Prismatic's forbidden: {}", entity)
+            log.info("Prismatic's forbidden: {}", entity)
             authCookies = None
             request(client)(ff) // retry again with new auth cookies
 
@@ -123,6 +123,7 @@ class PrismaticParser(username: String, password: String) extends Actor with Act
         log.error("Malformed json format {}", other)
         Map.empty
     }
+
 
   /**
    * Gat auth cookies form Prismatic
