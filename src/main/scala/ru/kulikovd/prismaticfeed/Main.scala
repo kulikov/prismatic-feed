@@ -14,17 +14,20 @@ object Main extends App {
 
   val config = ConfigFactory.load().getConfig("prismaticfeed")
 
-  val parser = system.actorOf(Props(new PrismaticParser(
+  val parser = system.actorOf(Props(
+    classOf[PrismaticParser],
     config.getString("username"),
     config.getString("password")
-  )))
+  ))
 
   val feedStorage = system.actorOf(Props(
-    new FeedStorage(parser, Duration(config.getMilliseconds("update-interval"), "ms"))
+    classOf[FeedStorage],
+    parser,
+    Duration(config.getMilliseconds("update-interval"), "ms")
   ))
 
   IO(Http) ! Http.Bind(
-    listener  = system.actorOf(Props(new RssService(feedStorage))),
+    listener  = system.actorOf(Props(classOf[RssService], feedStorage)),
     interface = config.getString("host"),
     port      = config.getInt("port")
   )
