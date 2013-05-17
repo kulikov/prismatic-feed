@@ -51,7 +51,7 @@ class FeedStorage(parser: ActorRef, updateInterval: FiniteDuration) extends Acto
     val p = Promise[TreeMap[Long, FeedItem]]()
 
     log.info("Request feed by {}", msg)
-    
+
     def complete() {
       context.system.scheduler.scheduleOnce(updateInterval, self, UpdateFeed(msg))
       context.unbecome()

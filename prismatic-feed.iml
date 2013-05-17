@@ -15,6 +15,7 @@
     <orderEntry type="library" name="akka-actor" level="project" />
     <orderEntry type="library" name="spray-json_2.10-1.2.3" level="project" />
     <orderEntry type="library" name="config-1.0.0" level="project" />
+    <orderEntry type="library" name="ostrich_2.10-9.1.0" level="project" />
   </component>
 </module>
 
