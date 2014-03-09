@@ -5,28 +5,49 @@ import scala.concurrent.duration._
 import scala.util.Success
 
 import akka.actor._
+import akka.pattern.ask
 import akka.util.Timeout
 import spray.client.pipelining._
 import spray.http._
 import spray.http.HttpHeaders.RawHeader
 import spray.http.HttpHeaders.`Set-Cookie`
-import spray.json._
+import akka.io.IO
+import spray.can.Http
 
 
 sealed trait FeedRequest
 case object GetPrivateFeed extends FeedRequest
 case class GetPublicActivityFor(username: String) extends FeedRequest
 
-case class FeedItems(items: Map[Long, FeedItem])
+case class FeedItems(feedId: String, items: Map[Long, FeedItem])
 case class FeedItem(id: Long, title: String, url: String, date: Long, author: String, text: String)
 
+case class PrismaticJson(id: String, docs: List[DocJson])
+case class AuthorJson(name: Option[String])
+case class FeedJson(title: Option[String])
+case class DocJson(
+  id: Long,
+  title: String,
+  url: String,
+  date: Long,
+  author: Option[AuthorJson],
+  feed: Option[FeedJson],
+  text: String
+)
 
-class PrismaticParser(username: String, password: String) extends Actor with ActorLogging {
+case class ViewedJson(`viewed-data`: Iterable[ViewedDocJson])
+case class ViewedDocJson(`doc-id`: Long, `feed-id`: String, dwell: Int = 0)
+
+
+class PrismaticParser(username: String, password: String) extends Actor with ActorLogging with JsonSupport {
   import context.dispatcher
+  import context.system
 
   implicit val timeout = Timeout(10 seconds)
 
   var authCookies: Option[String] = None
+
+  val randomizer = new scala.util.Random
 
   def receive = {
     case GetPrivateFeed             ⇒ request(sender)(privateFeed)
@@ -37,31 +58,46 @@ class PrismaticParser(username: String, password: String) extends Actor with Act
    * Private user feed
    */
   def privateFeed(client: ActorRef, auth: String) =
-    sendReceive.apply(HttpRequest(
-      uri = "http://api.getprismatic.com/news/home",
+    (IO(Http) ? HttpRequest(
+      uri = "http://api.getprismatic.com/news/personal/personalkey?api-version=1.2&limit=8&rand=" + randomizer.nextInt(10000000),
       headers = List(RawHeader("Cookie", auth))
-    ))
+    )).mapTo[HttpResponse]
 
   /**
    * Public activity for $user
    */
   def publicActivity(user: String)(client: ActorRef, auth: String) =
-    sendReceive.apply(HttpRequest(
-      uri = "http://api.getprismatic.com/news/activity/" + user,
+    (IO(Http) ? HttpRequest(
+      uri = "http://api.getprismatic.com/news/activity/" + user + "?api-version=1.2&limit=8&rand=" + randomizer.nextInt(10000000),
       headers = List(RawHeader("Cookie", auth))
-    ))
+    )).mapTo[HttpResponse]
 
 
   private def request(client: ActorRef)(ff: (ActorRef, String) ⇒ Future[HttpResponse]) {
-    authCookies map (Future.successful) getOrElse authinticate onComplete {
+    (authCookies map Future.successful getOrElse authinticate) onComplete {
       case Success(auth: String) ⇒
         authCookies = Some(auth)
+
         ff(client, auth) onComplete {
           case Success(HttpResponse(StatusCodes.OK, entity, _, _)) ⇒
             log.info("Feed successfully loaded!")
 
             try {
-              client ! FeedItems(parseResults(entity.asString))
+              val items = parseResults(entity.asString)
+              client ! items
+
+              // mark all items as viewed
+              IO(Http) ? Post(
+                "http://api.getprismatic.com/event/mark-viewed?api-version=1.2",
+                HttpEntity(ContentTypes.`application/json`, serialize(ViewedJson(items.items.map { case (id, _) ⇒
+                  ViewedDocJson(id, items.feedId)
+                })))
+              ).withHeaders(List(
+                RawHeader("Cookie", auth)
+              )) onSuccess {
+                case HttpResponse(StatusCodes.OK, _, _, _) ⇒
+                  log.info("Marked items {} as viewed", items.items.keys.mkString(", "))
+              }
             } catch {
               case e: Exception ⇒
                 log.error("Error parse feed response from Prismatic: {} \n {}", e, e.getStackTraceString)
@@ -85,44 +121,26 @@ class PrismaticParser(username: String, password: String) extends Actor with Act
     }
   }
 
-  implicit private class JsonExtractors(val json: JsValue) {
-    def s: String = json match {
-      case JsString(value) ⇒ value
-      case other ⇒ other.toString()
-    }
-
-    def n: Long = json match {
-      case JsNumber(value) ⇒ value.toLong
-      case other ⇒ 0L
-    }
-
-    def f(name: String) = json match {
-      case JsObject(fields) if (fields.contains(name)) ⇒ fields(name).s
-      case _ ⇒ ""
-    }
-  }
-
   /**
    * Parse json string
    */
-  private def parseResults(json: String): Map[Long, FeedItem] =
-    JsonParser(json).asJsObject.fields("docs") match {
-      case JsArray(docs) ⇒
-        docs.collect({ case JsObject(fs) ⇒
-          FeedItem(
-            id     = fs("id").n,
-            title  = fs("title").s,
-            url    = fs("url").s,
-            date   = fs("date").n,
-            author = fs("author").f("name") + " / " + fs("feed").f("title"),
-            text   = fs("text").s
-          )
-        }).map(f ⇒ f.id → f).toMap
+  private def parseResults(json: String) = {
+    val feed = deserialize[PrismaticJson](json)
 
-      case other ⇒
-        log.error("Malformed json format {}", other)
-        Map.empty
-    }
+    FeedItems(
+      feedId = feed.id,
+      items  = feed.docs.map({ doc ⇒
+        doc.id → FeedItem(
+          id = doc.id,
+          title = doc.title,
+          url = doc.url,
+          date = doc.date,
+          author = Seq(doc.author.flatMap(_.name), doc.feed.flatMap(_.title)).flatten.mkString(" / "),
+          text = doc.text
+        )
+      }).toMap
+    )
+  }
 
 
   /**
@@ -131,49 +149,27 @@ class PrismaticParser(username: String, password: String) extends Actor with Act
   private def authinticate: Future[String] = {
     val promise = Promise[String]()
 
-    def cookie(headers: List[HttpHeader], cookieName: String) = headers.collect({
-      case `Set-Cookie`(c) if (c.name == cookieName) ⇒ cookieName + "=" + c.content
-    }).head
+    def cookie(headers: List[HttpHeader], cookieName: String) = headers.collectFirst({
+      case `Set-Cookie`(c) if c.name == cookieName ⇒ cookieName + "=" + c.content
+    }).getOrElse(throw new RuntimeException("Not found cookie with name " + cookieName))
 
-    var AWSELB, pPublic = ""
-
-    sendReceive.apply(Get("http://auth.getprismatic.com/receiver.html")) flatMap {
-      case HttpResponse(StatusCodes.OK, _, headers, _) ⇒
-        AWSELB = cookie(headers, "AWSELB")
-
-        sendReceive apply Post(
-          "http://auth.getprismatic.com/auth/event_public_dispatch?api-version=1.0",
-          HttpEntity(ContentType.`application/json`, """{"category":"load","page":{"uri":"/","search":"","referer":""},"browser":"","type":"landing"}""")
-        ).withHeaders(List(
-          RawHeader("Cookie", AWSELB)
-        ))
-
-    } flatMap {
-      case HttpResponse(StatusCodes.OK, _, headers, _) ⇒
-        pPublic = cookie(headers, "p_public")
-        val psWww = cookie(headers, "_ps_www")
-
-        sendReceive apply Post(
-          "http://auth.getprismatic.com/auth/login?api-version=1.0&ignore=true&whitelist_url=http%3A%2F%2Fgetprismatic.com%2Fnews%2Fhome",
-          HttpEntity(ContentType.`application/json`, """{"handle":"%s","password":"%s"}""".format(username, password))
-        ).withHeaders(List(
-          RawHeader("Cookie", List(AWSELB, pPublic, psWww) mkString "; ")
-        ))
-
-    } flatMap {
+    IO(Http) ? Post(
+      "http://api.getprismatic.com/2.0/auth/login?api-version=1.2",
+      HttpEntity(ContentTypes.`application/json`, """{"handle":"%s","password":"%s"}""".format(username, password))
+    ) flatMap {
       case HttpResponse(StatusCodes.OK, _, headers, _) ⇒
         val prismatic = cookie(headers, "prismatic")
 
-        sendReceive apply Get(
-          "http://api.getprismatic.com/user/info?rand=21701246&callback=prismatic.userPromise.fulfill&api-version=1.0"
+        IO(Http) ? Post(
+          "http://api.getprismatic.com/news/personal/personalkey?api-version=1.2",
+          HttpEntity(ContentTypes.`application/json`, """{"skip-ids":null,"viewed-data":null}""")
         ).withHeaders(List(
-          RawHeader("Cookie", List(pPublic, prismatic) mkString "; ")
-        ))
-
+          RawHeader("Cookie", prismatic)
+        )) map (r ⇒ (prismatic, r))
     } onComplete {
-      case Success(HttpResponse(StatusCodes.OK, _, headers, _)) ⇒
+      case Success((prismatic: String, HttpResponse(StatusCodes.OK, _, headers, _))) ⇒
         log.info("Auth complete!")
-        promise.success(cookie(headers, "_ps_api") + "; " + cookie(headers, "AWSELB"))
+        promise.success(prismatic + "; " + cookie(headers, "_ps_api") + "; " + cookie(headers, "AWSELB"))
 
       case error ⇒
         promise.failure(new Exception("Failure get auth cookies " + error))

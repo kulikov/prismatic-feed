@@ -21,7 +21,7 @@ class FeedStorage(parser: ActorRef, updateInterval: FiniteDuration) extends Acto
   implicit val timeout = Timeout(15 seconds)
   implicit val ordering = Ordering.ordered[Long].reverse
 
-  val MaxItemsByFeed = 30
+  val MaxItemsByFeed = 60
 
   var feeds = collection.mutable.Map.empty[FeedRequest, TreeMap[Long, FeedItem]]
 
@@ -34,7 +34,7 @@ class FeedStorage(parser: ActorRef, updateInterval: FiniteDuration) extends Acto
    * If hasn't feed for $msg - request it from PrismaticParser, or return
    */
   def prepare(client: ActorRef, msg: FeedRequest) {
-    feeds.get(msg) map (Future.successful) getOrElse (updateFeed(msg)) onComplete {
+    (feeds.get(msg) map Future.successful getOrElse updateFeed(msg)) onComplete {
       case Success(items) ⇒
         client ! SortedFeedItems(items)
 
@@ -53,6 +53,7 @@ class FeedStorage(parser: ActorRef, updateInterval: FiniteDuration) extends Acto
     log.info("Request feed by {}", msg)
 
     def complete() {
+      log.info("Schedule next request after {}", updateInterval)
       context.system.scheduler.scheduleOnce(updateInterval, self, UpdateFeed(msg))
       context.unbecome()
       unstashAll()
@@ -72,7 +73,7 @@ class FeedStorage(parser: ActorRef, updateInterval: FiniteDuration) extends Acto
     }
 
     parser ? msg onComplete {
-      case Success(FeedItems(items)) ⇒ self ! UpdateComplete(items)
+      case Success(FeedItems(_, items)) ⇒ self ! UpdateComplete(items)
       case error ⇒ self ! UpdateFailure(new Exception(s"Error request feed by $msg. Reason: $error"))
     }
 

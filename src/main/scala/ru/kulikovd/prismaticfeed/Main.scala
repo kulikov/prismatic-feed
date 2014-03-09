@@ -6,8 +6,7 @@ import akka.actor.{ActorSystem, Props}
 import akka.io.IO
 import com.typesafe.config.ConfigFactory
 import spray.can.Http
-
-import com.twitter.ostrich.admin._
+import java.util.concurrent.TimeUnit
 
 
 object Main extends App {
@@ -15,8 +14,6 @@ object Main extends App {
   implicit val system = ActorSystem()
 
   val config = ConfigFactory.load().getConfig("prismaticfeed")
-
-  val collector = new TimeSeriesCollector()
 
   val parser = system.actorOf(Props(
     classOf[PrismaticParser],
@@ -27,7 +24,7 @@ object Main extends App {
   val feedStorage = system.actorOf(Props(
     classOf[FeedStorage],
     parser,
-    Duration(config.getMilliseconds("update-interval"), "ms")
+    FiniteDuration(config.getDuration("update-interval", TimeUnit.MILLISECONDS), "millis")
   ))
 
   IO(Http) ! Http.Bind(
@@ -35,13 +32,4 @@ object Main extends App {
     interface = config.getString("host"),
     port      = config.getInt("port")
   )
-
-
-  val adminFactory = AdminServiceFactory(httpPort = 8887)
-  val admin = adminFactory(RuntimeEnvironment(this, Array.empty))
-
-  collector.registerWith(admin)
-  admin.start()
-
 }
-
